@@ -65,10 +65,10 @@ import com.ibm.streams.operator.model.PrimitiveOperator;
  * Class for the RutaText operator that receives a tuple with document (rstring), applies the RUTA script to the CAS and then submits a tuple containing the serialized UIMA CAS (rstring).
  */
 @PrimitiveOperator(name="RutaText", namespace="com.ibm.streamsx.nlp",
-description="The Java Operator RutaText uses the Apache UIMA Ruta rules to annotate incoming tuple with text of type rstring. It creates a UIMA CAS from the text, applies the RUTA script to the CAS, serializes the resulting CAS to .xmi and then submits a tuple of type rstring. The RUTA rules, resources and CAS types are expected in a UIMA .pear file. The .pear file gets loaded on operator initialization and reloaded when a window punctuation is received on the second input port. The .pear file is installed in the data directory under 'installedPears<OPERATOR_NAME>'. Please, find in toolkit dir ./doc/UIMA_workbench.pdf a detailed sample description of Ruta .pear creation.")
+description="The Java Operator RutaText uses the Apache UIMA Ruta rules to annotate incoming tuple with text of type rstring. It creates a UIMA CAS from the text, applies the RUTA script to the CAS, serializes the resulting CAS to .xmi and then submits a tuple of type rstring. The RUTA rules, resources and CAS types are expected in a UIMA .pear file. The .pear file gets loaded on operator initialization and reloaded when a window punctuation is received on the second input port. The .pear file is installed in the data directory under 'installedPears<OPERATOR_NAME>'. If data directory is not set, then /tmp is used for installation. Please, find in toolkit dir ./doc/UIMA_workbench.pdf a detailed sample description of Ruta .pear creation. If this operator is used in the Streaming Analytics service (IBM Cloud), then the data directory needs to be set to '/tmp'.")
 @InputPorts({@InputPortSet(id="0", description="Port that ingests tuples", cardinality=1, optional=false, windowingMode=WindowMode.NonWindowed, windowPunctuationInputMode=WindowPunctuationInputMode.Oblivious), @InputPortSet(id="1", description="Optional control port", cardinality=1, optional=true, controlPort=true, windowingMode=WindowMode.NonWindowed, windowPunctuationInputMode=WindowPunctuationInputMode.Oblivious)})
 @OutputPorts({@OutputPortSet(description="Port that produces tuples", cardinality=1, optional=false, windowPunctuationOutputMode=WindowPunctuationOutputMode.Preserving, windowPunctuationInputPort="0")})
-@Libraries({"impl/lib/apache-uima/uima-core.jar","impl/lib/apache-uima/ruta-core-2.4.0.jar","impl/lib/apache-uima/uimafit-core-2.1.0.jar","impl/lib/apache-uima/antlr-runtime-3.5.2.jar","impl/lib/apache-uima/spring-asm-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-beans-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-context-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-core-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-expression-3.1.2.RELEASE.jar","impl/lib/apache-uima/commons-lang-2.6.jar","impl/lib/apache-uima/commons-logging-1.1.1.jar","impl/lib/apache-uima/commons-lang3-3.1.jar"})
+@Libraries({"impl/lib/apache-uima/uima-core.jar","impl/lib/apache-uima/ruta-core-2.4.0.jar","impl/lib/apache-uima/uimafit-core-2.1.0.jar","impl/lib/apache-uima/antlr-runtime-3.5.2.jar","impl/lib/apache-uima/spring-asm-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-beans-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-context-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-core-3.1.2.RELEASE.jar","impl/lib/apache-uima/spring-expression-3.1.2.RELEASE.jar","impl/lib/apache-uima/commons-lang-2.6.jar","impl/lib/apache-uima/commons-logging-1.1.1.jar","impl/lib/apache-uima/commons-lang3-3.1.jar","impl/lib/apache-uima/commons-collections-3.2.1.jar","impl/lib/apache-uima/commons-io-2.4.jar","impl/lib/apache-uima/commons-math3-3.0.jar"})
 public class RutaText extends AbstractUimaOperator {
 	
 	private static Logger trace = Logger.getLogger(RutaText.class.getName());
@@ -76,6 +76,7 @@ public class RutaText extends AbstractUimaOperator {
 	private static final String PARAMETER_NAME_INPUT_DOC = "inputDoc";
 	private static final String PARAMETER_NAME_DEBUG_MODE = "debugMode";
 	private static final String PARAMETER_NAME_REMOVE_BASICS = "removeBasics";
+	private static final String PARAMETER_NAME_TRIM_INPUT_DOC = "trimInputDoc";
 	
 	/**
 	 * Configuration parameters of the UIMA Ruta Analysis Engine 
@@ -86,6 +87,11 @@ public class RutaText extends AbstractUimaOperator {
 	@Parameter(name=PARAMETER_NAME_INPUT_DOC, description="This optional parameter specifies the attribute of the input tuples that is passed to the Analytics Engine of UIMA. If there is only one attribute on the input tuple, this parameter is not required.", optional=true)
 	public void setInputDoc(String inputDoc) {
 		this.inputDoc = inputDoc;
+	}
+
+	@Parameter(name=PARAMETER_NAME_TRIM_INPUT_DOC, description="If this optional parameter is set to false, then trim function is not applied on the input document and leading whitespace characters are not removed. The default value of this parameter is set to true.", optional=true)
+	public void setTrimInputDoc(boolean trimInputDoc) {
+		this.trimInputDoc = trimInputDoc;
 	}
 	
 	@Parameter(name=PARAMETER_NAME_DEBUG_MODE, description="If this parameter is set to true, then additional information about the execution of a rule script is added to the CAS. The default value of this parameter is set to false.", optional=true)
@@ -170,7 +176,10 @@ public class RutaText extends AbstractUimaOperator {
 
 		selectView(); // must be called per tuple since cas.reset() destroys the view
 
-		String document = tuple.getString(inputDoc).trim();
+		String document = tuple.getString(inputDoc);
+		if (trimInputDoc) {
+			document = document.trim();
+		}
 		// put document text in CAS
 		cas.setDocumentText(document);
 

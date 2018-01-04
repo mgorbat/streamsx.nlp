@@ -9,14 +9,24 @@ use com.ibm.streamsx.nlp.utils::*;
 
 /**
  * This operator identifies to which of a set of categories the input text belongs on the basis of a previously trained model.
+ * 
+ * The LinearClassification operator should be used in a Streams release where SPL Python primitive support is not provided (e.g. Streams 3.2). It uses a **ShellPipe** operator to invoke Python scripts.
+ * When using a Streams release 4.2 or later, it is recommended to create a *SPL Python primitive operator* to invoke Python classes or functions.
  *
  * @input InStream
  * One tuple is one document.
  *
  * @output OutStream
- * The result tuple with one attribute 'classes' which is the list of classifications/predictions
- * and a second attribute 'decisions' which is a list<float64> with the list of decisions
+ * The result tuple with one attribute `classes` which is the list of classifications/predictions
+ * and a second attribute `decisions` which is a list<float64> with the list of decisions
  * This stream must contain the schema defined by the resultType.
+ * Where `decisions` is the output of the `LinearSVC` `decision_function` 
+ * [http://scikit-learn.org/stable/modules/generated/sklearn.svm.LinearSVC.html#sklearn.svm.LinearSVC.decision_function] 
+ * which returns the Confidence scores for one sample and all classes. The confidence score for a sample is the signed 
+ * distance of that sample to the hyperplane. >0 means this class would be predicted.
+ * The `decisions` list contains a single value if the training was with 2 classes and it contains n values if the training was with n>2 classes
+ * Where `modelClasses` is the list of the unique class names of the trained model. The order of the `decisions`list corresponds to the order of the 
+ * `modelClasses` list.
  *
  * @param pythonCommand
  * The name of the python binary. The default name is `python`.
@@ -34,6 +44,9 @@ use com.ibm.streamsx.nlp.utils::*;
  * 
  * @param outStreamType
  * The OutStream (output port 0) schema of this operator. The schema must contain the schema defined by the resultType.
+ *
+ * @param initOnFirstTuple
+ * The script is called on operator startup. If this parameter is set to true, then the script is called on first tuple.
  */
 public composite LinearClassification
 (
@@ -44,6 +57,7 @@ public composite LinearClassification
 		expression<rstring> $pythonCommand: "python";
 		expression<rstring> $pythonScript: getToolkitPath()+"/etc/python/LinearClassification.py";
 		expression<rstring> $modelFilesDirectory;
+		expression<boolean> $initOnFirstTuple : false;
 		attribute $documentAttribute;
 		type $outStreamType;
 
@@ -52,7 +66,8 @@ public composite LinearClassification
 	 */
 	type static resultType = tuple<
 		list<rstring> classes,
-		list<float64> decisions
+		list<float64> decisions,
+		list<rstring> modelClasses
 	>;
 
 	graph
@@ -67,6 +82,7 @@ public composite LinearClassification
 			param command: $pythonCommand+" -u "+$pythonScript+" "+$modelFilesDirectory+"/LinearSVC_model.pkl"+" "+$modelFilesDirectory+"/TfidfVectorizer_model.pkl";
 				stdinAttribute: $documentAttribute;
 				stdoutAttribute: "lcPythonScriptOutput";
+				initOnFirstTuple: $initOnFirstTuple;
 		}
 
 		(
@@ -85,18 +101,19 @@ public composite LinearClassification
 
 		//Filter out the relevant result classes
 		//This operator expects an result from ShellPipe operator in the form
-		//[prediction]|*|[[decision0, decision1..]]
+		//[prediction]|*|[[decision0, decision1,..]]|*|[class0, class1,..]
 		// or
-		//[prediction]|*|[decision0, decision1..] if number of classes == 2
+		//[prediction]|*|[decisionX]|*|[class0, class1] if number of classes == 2
 		stream<$outStreamType> OutStream as O = Custom(Classifications as I) {
 			logic
 				onTuple I : {
 					//printStringLn(I.lcPythonScriptOutput);
 					mutable list<rstring> outputPredictions = [];
 					mutable list<float64> outputDecisions = [];
+					mutable list<rstring> outputModelClasses = [];
 					mutable list<rstring> res = [];
 					spl.string::tokenize(I.lcPythonScriptOutput, '|*|', true, false, res);
-					if (size(res) == 2) {
+					if (size(res) == 3) {
 						//extract predictions
 						mutable int32 s = length(res[0]);
 						if ((s > 1) && (res[0][0] == "[") && (res[0][s-1] == "]")) { //remove [ ] from list literal
@@ -136,6 +153,23 @@ public composite LinearClassification
 						} else {
 							appTrc(Trace.error, "Ignore invalid decisions result from LinearClassification: '" + I.lcPythonScriptOutput + "'", "texttoolkit");
 						}
+						//extract model classes list
+						s = length(res[2]);
+						if ((s > 1) && (res[2][0] == "[") && (res[2][s-1] == "]")) { //remove [ ] from list literal
+							rstring modelClassList = spl.string::substring(res[2], 1, s-2);
+							list<rstring> modelClasses_ = spl.string::tokenize(modelClassList, " \t\n", false); //extract list members
+							for (rstring c in modelClasses_) {
+								int32 s = length(c);
+								if ((s > 1) && (((c[0] == "'") && (c[s-1] == "'")) || ((c[0] == "\"") && (c[s-1] == "\"")))) {
+									rstring strippedString = spl.string::substring(c, 1, s-2);
+									appendM(outputModelClasses, strippedString);
+								} else {
+									appTrc(Trace.error, "Ignore invalid model class list member from LinearClassification: '" + c + "' in:" + I.lcPythonScriptOutput, "texttoolkit");
+								}
+							}
+						} else {
+							appTrc(Trace.error, "Ignore invalid model class list from LinearClassification: '" + I.lcPythonScriptOutput + "'", "texttoolkit");
+						}
 					} else {
 						appTrc(Trace.error, "Ignore invalid result from LinearClassification: '" + I.lcPythonScriptOutput + "'", "texttoolkit");
 					}
@@ -143,6 +177,7 @@ public composite LinearClassification
 					assignFrom(otuple, I);
 					otuple.classes = outputPredictions;
 					otuple.decisions = outputDecisions;
+					otuple.modelClasses = outputModelClasses;
 					submit(otuple, O);
 				}
 		}

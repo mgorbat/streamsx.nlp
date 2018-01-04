@@ -56,7 +56,7 @@ import com.ibm.streams.operator.model.PrimitiveOperator;
  * Class for the UimaText operator that receives a tuple with document, processes the UIMA AnalysisEngine of the deployed PEAR file. The output stream tuple either contains the serialized UIMA CAS (rstring) or a custom attribute defined with the outputAttributes parameter.
  */
 @PrimitiveOperator(name="UimaText", namespace="com.ibm.streamsx.nlp",
-description="The Java Operator UimaText uses a Apache UIMA Analysis Engine to annotate incoming tuple with text of type rstring. It creates a UIMA CAS from the text, processes the Analysis Engine, serializes the resulting CAS to .xmi and then submits a tuple of type rstring. The Analysis Engine, resources and CAS types are expected in a UIMA .pear file. The .pear file gets loaded on operator initialization and reloaded when a window punctuation is received on the second input port. The .pear file is installed in the data directory under 'installedPears<OPERATOR_NAME>'. Please, find in toolkit dir ./doc/UIMA_sample.pdf a detailed sample description of UIMA .pear creation.")
+description="The Java Operator UimaText uses a Apache UIMA Analysis Engine to annotate incoming tuple with text of type rstring. It creates a UIMA CAS from the text, processes the Analysis Engine, serializes the resulting CAS to .xmi and then submits a tuple of type rstring. The Analysis Engine, resources and CAS types are expected in a UIMA .pear file. The .pear file gets loaded on operator initialization and reloaded when a window punctuation is received on the second input port. The .pear file is installed in the data directory under 'installedPears<OPERATOR_NAME>'. If data directory is not set, then /tmp is used for installation. Please, find in toolkit dir ./doc/UIMA_sample.pdf a detailed sample description of UIMA .pear creation. If this operator is used in the Streaming Analytics service (IBM Cloud), then the data directory needs to be set to '/tmp'.")
 @InputPorts({@InputPortSet(id="0", description="Port that ingests tuples", cardinality=1, optional=false, windowingMode=WindowMode.NonWindowed, windowPunctuationInputMode=WindowPunctuationInputMode.Oblivious), @InputPortSet(id="1", description="Optional control port", cardinality=1, optional=true, controlPort=true, windowingMode=WindowMode.NonWindowed, windowPunctuationInputMode=WindowPunctuationInputMode.Oblivious)})
 @OutputPorts({@OutputPortSet(description="Port that produces tuples", cardinality=1, optional=false, windowPunctuationOutputMode=WindowPunctuationOutputMode.Preserving, windowPunctuationInputPort="0")})
 public class UimaText extends AbstractUimaOperator {
@@ -64,10 +64,16 @@ public class UimaText extends AbstractUimaOperator {
 	private static Logger trace = Logger.getLogger(UimaText.class.getName());
 	
 	private static final String PARAMETER_NAME_INPUT_DOC = "inputDoc";
+	private static final String PARAMETER_NAME_TRIM_INPUT_DOC = "trimInputDoc";
 
 	@Parameter(name=PARAMETER_NAME_INPUT_DOC, description="This optional parameter specifies the attribute of the input tuples that is passed to the Analytics Engine of UIMA. If there is only one attribute on the input tuple, this parameter is not required.", optional=true)
 	public void setInputDoc(String inputDoc) {
 		this.inputDoc = inputDoc;
+	}
+
+	@Parameter(name=PARAMETER_NAME_TRIM_INPUT_DOC, description="If this optional parameter is set to false, then trim function is not applied on the input document and leading whitespace characters are not removed. The default value of this parameter is set to true.", optional=true)
+	public void setTrimInputDoc(boolean trimInputDoc) {
+		this.trimInputDoc = trimInputDoc;
 	}
 	
 	@ContextCheck(compile = true)
@@ -139,7 +145,10 @@ public class UimaText extends AbstractUimaOperator {
 	protected void handleInputOnPort0(com.ibm.streams.operator.Tuple tuple) throws Exception{
 		selectView(); // must be called per tuple since cas.reset() destroys the view
 
-		String document = tuple.getString(inputDoc).trim();
+		String document = tuple.getString(inputDoc);
+		if (trimInputDoc) {
+			document = document.trim();
+		}
 		// put document text in CAS
 		cas.setDocumentText(document);
 

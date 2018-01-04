@@ -21,3 +21,4 @@ make-doc:
 
 clean-doc:
 	for x in $(DIRS); do cd $$x; rm -rf doc; cd -; done
+
